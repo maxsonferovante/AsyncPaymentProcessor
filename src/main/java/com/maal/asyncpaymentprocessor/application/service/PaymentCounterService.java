@@ -41,23 +41,22 @@ public class PaymentCounterService {
         try {
             String processorKey = processor.name().toLowerCase();
             
-            // Executa operações atômicas em pipeline para máxima eficiência
-            redisTemplate.executePipelined((org.springframework.data.redis.core.RedisCallback<Object>) connection -> {
-                
-                // 1. Incrementa contador de requests - operação O(1)
-                String requestsField = processorKey + "_totalRequests";
-                redisTemplate.opsForHash().increment(COUNTERS_KEY, requestsField, 1);
-                
-                // 2. Incrementa valor total usando HINCRBYFLOAT - operação O(1)
-                String amountField = processorKey + "_totalAmount";
-                redisTemplate.opsForHash().increment(COUNTERS_KEY, amountField, amount.doubleValue());
-                
-                // 3. Atualiza timestamp da última atividade
-                String lastActivityField = processorKey + "_lastActivityAt";
+            // Versão simplificada sem pipeline para recursos limitados
+            // Operações individuais são mais leves em memória
+            String requestsField = processorKey + "_totalRequests";
+            String amountField = processorKey + "_totalAmount";
+            String lastActivityField = processorKey + "_lastActivityAt";
+            
+            // 1. Incrementa contador de requests - operação O(1)
+            redisTemplate.opsForHash().increment(COUNTERS_KEY, requestsField, 1);
+            
+            // 2. Incrementa valor total - operação O(1)
+            redisTemplate.opsForHash().increment(COUNTERS_KEY, amountField, amount.doubleValue());
+            
+            // 3. Atualiza timestamp da última atividade (opcional em recursos limitados)
+            if (Math.random() < 0.1) { // Atualiza apenas 10% das vezes para economizar
                 redisTemplate.opsForHash().put(COUNTERS_KEY, lastActivityField, Instant.now().toString());
-                
-                return null;
-            });
+            }
             
             logger.debug("Contadores incrementados para {}: amount={}", processor, amount);
             
