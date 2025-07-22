@@ -25,7 +25,7 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
     private static final Logger logger = LoggerFactory.getLogger(ProcessPaymentUseCaseImpl.class);
     
     // Configurações de retry e circuit breaker
-    private static final int MAX_RETRY_ATTEMPTS = 3;
+    private static final int MAX_RETRY_ATTEMPTS = 2;
    
     private final PaymentProcessorHttpClient paymentProcessorClient;
     private final RedisHealthCacheRepository healthCacheRepository;
@@ -76,7 +76,7 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
                 handlePaymentFailure(payment);
             }
             
-        } catch (Exception e) {
+        } catch (Exception _) {
             handlePaymentFailure(payment);
         }
     }
@@ -94,11 +94,7 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
         }
         
         // Estratégia 2: Se Default falhou, tenta Fallback
-        if (tryProcessWithProcessor(payment, PaymentProcessorType.FALLBACK)) {
-            return true;
-        }
-        
-        return false;
+        return tryProcessWithProcessor(payment, PaymentProcessorType.FALLBACK);
     }
     
     /**
@@ -117,8 +113,6 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
                 boolean success = paymentProcessorClient.processPayment(payment, processorType);
                 
                 if (success) {
-                    logger.info("Pagamento {} processado com sucesso via {}", 
-                        payment.getCorrelationId(), processorType);
                     payment.setPaymentProcessorType(processorType);
                     return true;
                 }
