@@ -18,23 +18,53 @@ repositories {
     mavenCentral()
 }
 
-extra["springCloudVersion"] = "2025.0.0"
-
 dependencies {
-    implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
+    // Spring Boot starters essenciais
+    implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
-    implementation("org.springframework.cloud:spring-cloud-starter-openfeign")
-    runtimeOnly("org.postgresql:postgresql")
+    
+    // Cliente HTTP (RestTemplate) - servidor web desabilitado via application.properties
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    
+    // Jackson para serialização JSON (ainda necessário para Redis)
+    implementation("com.fasterxml.jackson.core:jackson-databind")
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
+    
+    // Lombok para reduzir boilerplate
+    compileOnly("org.projectlombok:lombok")
+    annotationProcessor("org.projectlombok:lombok")
+    
+    // Testes
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-dependencyManagement {
-    imports {
-        mavenBom("org.springframework.cloud:spring-cloud-dependencies:${property("springCloudVersion")}")
-    }
-}
-
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+
+// Configuração para eliminar avisos do JDK 24+ relacionados ao Netty
+tasks.withType<JavaExec> {
+    jvmArgs(
+        "--sun-misc-unsafe-memory-access=allow",
+        "--enable-native-access=ALL-UNNAMED"
+    )
+}
+
+// Configuração para bootRun
+tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
+    jvmArgs(
+        "--sun-misc-unsafe-memory-access=allow",
+        "--enable-native-access=ALL-UNNAMED"
+    )
+}
+
+// Configuração para testes
+tasks.withType<Test> {
+    useJUnitPlatform()
+    jvmArgs(
+        "--sun-misc-unsafe-memory-access=allow",
+        "--enable-native-access=ALL-UNNAMED"
+    )
 }
