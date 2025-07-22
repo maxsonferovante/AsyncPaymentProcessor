@@ -48,6 +48,21 @@ public class GraalVmNativeConfiguration implements RuntimeHintsRegistrar {
                 MemberCategory.DECLARED_FIELDS,
                 MemberCategory.DECLARED_CLASSES);
         
+        // Registra PaymentCounterService classes internas para serialização Redis
+        hints.reflection()
+            .registerType(com.maal.asyncpaymentprocessor.application.service.PaymentCounterService.ProcessorStats.class, 
+                MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS,
+                MemberCategory.INVOKE_PUBLIC_METHODS,
+                MemberCategory.DECLARED_FIELDS,
+                MemberCategory.DECLARED_CLASSES);
+        
+        hints.reflection()
+            .registerType(com.maal.asyncpaymentprocessor.application.service.PaymentCounterService.ProcessorCounters.class, 
+                MemberCategory.INVOKE_PUBLIC_CONSTRUCTORS,
+                MemberCategory.INVOKE_PUBLIC_METHODS,
+                MemberCategory.DECLARED_FIELDS,
+                MemberCategory.DECLARED_CLASSES);
+        
         // Registra enums para serialização
         hints.reflection()
             .registerType(PaymentProcessorType.class, 

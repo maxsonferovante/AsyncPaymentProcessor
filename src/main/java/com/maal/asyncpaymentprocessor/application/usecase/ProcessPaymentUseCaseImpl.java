@@ -2,6 +2,7 @@ package com.maal.asyncpaymentprocessor.application.usecase;
 
 import com.maal.asyncpaymentprocessor.adapter.out.paymentprocessor.PaymentProcessorHttpClient;
 import com.maal.asyncpaymentprocessor.adapter.out.redis.RedisHealthCacheRepository;
+import com.maal.asyncpaymentprocessor.application.service.PaymentCounterService;
 import com.maal.asyncpaymentprocessor.domain.model.HealthStatus;
 import com.maal.asyncpaymentprocessor.domain.model.Payment;
 import com.maal.asyncpaymentprocessor.domain.model.PaymentProcessorType;
@@ -30,13 +31,16 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
     private final PaymentProcessorHttpClient paymentProcessorClient;
     private final RedisHealthCacheRepository healthCacheRepository;
     private final PaymentQueuePublisher paymentQueuePublisher;
+    private final PaymentCounterService paymentCounterService;
 
     public ProcessPaymentUseCaseImpl(PaymentProcessorHttpClient paymentProcessorClient,
                                    RedisHealthCacheRepository healthCacheRepository,
-                                   PaymentQueuePublisher paymentQueuePublisher) {
+                                   PaymentQueuePublisher paymentQueuePublisher,
+                                   PaymentCounterService paymentCounterService) {
         this.paymentProcessorClient = paymentProcessorClient;
         this.healthCacheRepository = healthCacheRepository;
         this.paymentQueuePublisher = paymentQueuePublisher;
+        this.paymentCounterService = paymentCounterService;
     }
 
     @Override
@@ -58,7 +62,7 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
     /**
      * Processa um pagamento de forma assíncrona (chamado pelo worker).
      * Implementa a lógica de escolha de processador, retries e circuit breaker.
-     * NOVA ABORDAGEM: Sem persistência local - apenas processamento nos Payment Processors.
+     * NOVA ABORDAGEM: Sem persistência local - apenas processamento nos Payment Processors + contadores agregados Redis.
      * @param payment Pagamento a ser processado
      */
     public void processPaymentAsync(Payment payment) {
@@ -71,6 +75,14 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
             if (processed) {
                 // Sucesso - pagamento processado no Payment Processor
                 payment.setStatus(PaymentStatus.SUCCESS);
+                
+                // Incrementa contadores agregados no Redis para consultas futuras da API
+                PaymentProcessorType usedProcessor = payment.getPaymentProcessorType();
+                if (usedProcessor != null) {
+                    paymentCounterService.incrementCounters(usedProcessor, payment.getAmount());
+                    logger.debug("Contadores incrementados para pagamento processado com sucesso: correlationId={}, processor={}", 
+                        payment.getCorrelationId(), usedProcessor);
+                }
             } else {
                 // Falha - marca para retry
                 handlePaymentFailure(payment);
