@@ -19,10 +19,14 @@ repositories {
 }
 
 dependencies {
-    // Spring Boot starters essenciais
-    implementation("org.springframework.boot:spring-boot-starter")
-    implementation("org.springframework.boot:spring-boot-starter-data-redis")
-    
+    implementation("org.springframework.boot:spring-boot-starter-data-redis") {
+        exclude(group = "io.netty")
+    }
+    implementation("org.springframework.boot:spring-boot-starter-web") {
+        exclude(group = "io.netty")
+    }
+    implementation("io.netty:netty-all:4.2.3.Final")
+
     // Cliente HTTP (RestTemplate) - servidor web desabilitado via application.properties
     implementation("org.springframework.boot:spring-boot-starter-web")
     

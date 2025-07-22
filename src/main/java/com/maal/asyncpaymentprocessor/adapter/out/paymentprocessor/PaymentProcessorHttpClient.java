@@ -56,8 +56,6 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
         try {
             String url = getBaseUrlForType(type) + "/payments/service-health";
             
-            logger.debug("Fazendo health check para {}: {}", type, url);
-            
             // Faz a chamada GET /payments/service-health
             ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
             
@@ -71,9 +69,6 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
                     minResponseTime != null ? minResponseTime : 0,
                     Instant.now()
                 );
-                
-                logger.debug("Health check {} bem-sucedido: failing={}, minResponseTime={}ms", 
-                    type, healthStatus.isFailing(), healthStatus.getMinResponseTime());
                 
                 return Optional.of(healthStatus);
             }
@@ -131,35 +126,22 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
             
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
             
-            logger.debug("Processando pagamento {} com {}: {}", 
-                payment.getCorrelationId(), type, url);
-            
             // Faz a chamada POST /payments
             ResponseEntity<Map> response = restTemplate.postForEntity(url, request, Map.class);
             
             if (response.getStatusCode().is2xxSuccessful()) {
-                logger.info("Pagamento {} processado com sucesso via {}", 
-                    payment.getCorrelationId(), type);
                 return true;
             } else {
-                logger.warn("Pagamento {} falhou via {}: HTTP {}", 
-                    payment.getCorrelationId(), type, response.getStatusCode());
                 return false;
             }
             
         } catch (HttpClientErrorException e) {
-            logger.warn("Erro HTTP 4xx processando pagamento {} via {}: {} {}", 
-                payment.getCorrelationId(), type, e.getStatusCode(), e.getMessage());
             return false;
             
         } catch (HttpServerErrorException e) {
-            logger.warn("Erro HTTP 5xx processando pagamento {} via {}: {} {}", 
-                payment.getCorrelationId(), type, e.getStatusCode(), e.getMessage());
             return false;
             
         } catch (ResourceAccessException e) {
-            logger.warn("Erro de conectividade processando pagamento {} via {}: {}", 
-                payment.getCorrelationId(), type, e.getMessage());
             return false;
             
         } catch (Exception e) {

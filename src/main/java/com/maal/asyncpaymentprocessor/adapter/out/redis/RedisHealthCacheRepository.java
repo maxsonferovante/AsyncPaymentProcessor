@@ -47,9 +47,6 @@ public class RedisHealthCacheRepository {
             
             // Salva no Redis com TTL de 4 segundos
             redisTemplate.opsForValue().set(key, healthStatusJson, CACHE_TTL);
-            
-            logger.debug("HealthStatus salvo no cache: type={}, failing={}, minResponseTime={}", 
-                type, healthStatus.isFailing(), healthStatus.getMinResponseTime());
                 
         } catch (JsonProcessingException e) {
             logger.warn("Falha na serialização Jackson, tentando serialização manual: type={}, erro={}", 
@@ -60,8 +57,6 @@ public class RedisHealthCacheRepository {
                 String manualJson = createManualJsonForHealthStatus(healthStatus);
                 String key = buildCacheKey(type);
                 redisTemplate.opsForValue().set(key, manualJson, CACHE_TTL);
-                
-                logger.debug("HealthStatus salvo com serialização manual: type={}", type);
                 
             } catch (Exception fallbackException) {
                 logger.error("Falha total ao salvar HealthStatus no cache: type={}, erro={}", 
@@ -103,7 +98,6 @@ public class RedisHealthCacheRepository {
                 // Fallback: parsing manual para compatibilidade com GraalVM Native Image
                 Optional<HealthStatus> manualParsed = parseManualJsonForHealthStatus(healthStatusJson);
                 if (manualParsed.isPresent()) {
-                    logger.debug("HealthStatus recuperado com parsing manual: type={}", type);
                     return manualParsed;
                 }
                 

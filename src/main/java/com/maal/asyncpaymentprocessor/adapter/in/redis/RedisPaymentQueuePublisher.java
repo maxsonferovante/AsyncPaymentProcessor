@@ -46,9 +46,6 @@ public class RedisPaymentQueuePublisher implements PaymentQueuePublisher {
             // Publica na fila principal usando LPUSH (adiciona no início da lista)
             // Isso garante que retries vão para o final da fila, mantendo ordem FIFO
             redisTemplate.opsForList().leftPush(paymentQueueKey, paymentJson);
-            
-            logger.debug("Pagamento publicado na fila principal {}: correlationId={}, status={}, retryCount={}", 
-                paymentQueueKey, payment.getCorrelationId(), payment.getStatus(), payment.getRetryCount());
                 
         } catch (JsonProcessingException e) {
             logger.error("Erro ao serializar pagamento para JSON: correlationId={}, erro={}", 

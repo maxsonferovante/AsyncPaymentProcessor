@@ -41,18 +41,12 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
 
     @Override
     public void receivePayment(Payment payment) {
-        logger.info("Recebendo pagamento para processamento: correlationId={}, amount={}", 
-            payment.getCorrelationId(), payment.getAmount());
-        
         try {
             // Define status inicial como PENDING
             payment.setStatus(PaymentStatus.PENDING);
             
             // Publica na fila para processamento assíncrono (SEM PERSISTÊNCIA LOCAL)
             paymentQueuePublisher.publish(payment);
-            
-            logger.info("Pagamento publicado na fila com sucesso: correlationId={}", 
-                payment.getCorrelationId());
                 
         } catch (Exception e) {
             logger.error("Erro ao processar recebimento do pagamento: correlationId={}, erro={}", 
@@ -68,8 +62,6 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
      * @param payment Pagamento a ser processado
      */
     public void processPaymentAsync(Payment payment) {
-        logger.info("Iniciando processamento assíncrono: correlationId={}", payment.getCorrelationId());
-        
         try {
             payment.setStatus(PaymentStatus.PROCESSING);
             
@@ -79,17 +71,12 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
             if (processed) {
                 // Sucesso - pagamento processado no Payment Processor
                 payment.setStatus(PaymentStatus.SUCCESS);
-                
-                logger.info("Pagamento processado com sucesso: correlationId={}, finalProcessor={}", 
-                    payment.getCorrelationId(), payment.getPaymentProcessorType());
             } else {
                 // Falha - marca para retry
                 handlePaymentFailure(payment);
             }
             
         } catch (Exception e) {
-            logger.error("Erro durante processamento assíncrono: correlationId={}, erro={}", 
-                payment.getCorrelationId(), e.getMessage(), e);
             handlePaymentFailure(payment);
         }
     }
@@ -111,9 +98,6 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
             return true;
         }
         
-        // Se ambos falharam, retorna false para indicar falha total
-        logger.warn("Falha ao processar pagamento com ambos os processadores: correlationId={}", 
-            payment.getCorrelationId());
         return false;
     }
     
@@ -122,13 +106,8 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
      * Inclui verificação de health check e lógica de retry.
      */
     private boolean tryProcessWithProcessor(Payment payment, PaymentProcessorType processorType) {
-        logger.debug("Tentando processar com {}: correlationId={}", 
-            processorType, payment.getCorrelationId());
-        
         // Verifica se o processador está saudável segundo o cache
         if (!isProcessorHealthy(processorType)) {
-            logger.debug("Processador {} não está saudável, pulando: correlationId={}", 
-                processorType, payment.getCorrelationId());
             return false;
         }
         
@@ -138,14 +117,11 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
                 boolean success = paymentProcessorClient.processPayment(payment, processorType);
                 
                 if (success) {
+                    logger.info("Pagamento {} processado com sucesso via {}", 
+                        payment.getCorrelationId(), processorType);
                     payment.setPaymentProcessorType(processorType);
-                    logger.info("Pagamento processado com sucesso na tentativa {}/{}: correlationId={}, processor={}", 
-                        attempt, MAX_RETRY_ATTEMPTS, payment.getCorrelationId(), processorType);
                     return true;
                 }
-                
-                logger.warn("Falha na tentativa {}/{} com {}: correlationId={}", 
-                    attempt, MAX_RETRY_ATTEMPTS, processorType, payment.getCorrelationId());
                                                 
                                     
             } catch (Exception e) {
@@ -168,11 +144,9 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
             
             if (healthStatus.isPresent()) {
                 boolean healthy = !healthStatus.get().isFailing();
-                logger.debug("Health check do cache para {}: healthy={}", processorType, healthy);
                 return healthy;
             } else {
                 // Se não há informação de health no cache, assume o fallback
-                logger.debug("Sem informação de health no cache para {}, assumindo saudável", processorType);
                 return false;
             }
             
@@ -195,15 +169,9 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
             if (payment.getRetryCount() < MAX_RETRY_ATTEMPTS) {
                 payment.setStatus(PaymentStatus.RETRY);
                 paymentQueuePublisher.publish(payment);
-                
-                logger.warn("Pagamento enviado para retry {}/{}: correlationId={}", 
-                    payment.getRetryCount(), MAX_RETRY_ATTEMPTS, payment.getCorrelationId());
             } else {
                 // Esgotou tentativas - falha definitiva
                 payment.setStatus(PaymentStatus.FAILED);
-                
-                logger.error("Pagamento falhou definitivamente após {} tentativas: correlationId={}", 
-                    MAX_RETRY_ATTEMPTS, payment.getCorrelationId());
             }
             
         } catch (Exception e) {

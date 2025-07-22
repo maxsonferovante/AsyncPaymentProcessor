@@ -38,8 +38,6 @@ public class HealthCheckOrchestratorImpl implements HealthCheckOrchestrator {
     @Scheduled(fixedDelay = 4000) // 4 segundos entre execuções
     @Override
     public void scheduleHealthChecks() {
-        logger.debug("Iniciando verificação de health check dos Payment Processors");
-        
         // Executa as verificações de health check de forma assíncrona para ambos os processadores
         CompletableFuture<Void> defaultCheck = CompletableFuture.runAsync(() -> 
             checkHealthAndUpdateCache(PaymentProcessorType.DEFAULT)
@@ -57,8 +55,6 @@ public class HealthCheckOrchestratorImpl implements HealthCheckOrchestrator {
         } catch (Exception e) {
             logger.warn("Timeout ou erro durante as verificações de health check: {}", e.getMessage());
         }
-        
-        logger.debug("Verificações de health check concluídas");
     }
     
     /**
@@ -67,8 +63,6 @@ public class HealthCheckOrchestratorImpl implements HealthCheckOrchestrator {
      */
     private void checkHealthAndUpdateCache(PaymentProcessorType processorType) {
         try {
-            logger.debug("Verificando health status do Payment Processor: {}", processorType);
-            
             // Chama o endpoint de health check do Payment Processor
             Optional<HealthStatus> healthStatusOpt = paymentProcessorPort.getHealthStatus(processorType);
             
@@ -77,11 +71,6 @@ public class HealthCheckOrchestratorImpl implements HealthCheckOrchestrator {
                 
                 // Atualiza o cache Redis com o status de saúde
                 redisHealthCacheRepository.saveHealthStatus(processorType, healthStatus);
-                
-                logger.debug("Health status atualizado para {}: failing={}, minResponseTime={}ms", 
-                    processorType, 
-                    healthStatus.isFailing(), 
-                    healthStatus.getMinResponseTime());
                     
             } else {
                 logger.warn("Não foi possível obter health status do Payment Processor: {}", processorType);

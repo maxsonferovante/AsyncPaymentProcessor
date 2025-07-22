@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Worker responsável por consumir pagamentos da fila Redis e processá-los de forma assíncrona.
  * OTIMIZADO: Usa técnicas avançadas de batch reading e pipeline operations baseadas em best practices.
- * Utiliza Virtual Threads do Java 21+ para máxima concorrência e performance.
+ 
  */
 @Component
 public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
@@ -93,8 +93,6 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
             int availableSlots = maxConcurrentPayments - activeTaskCount.get();
             
             if (availableSlots <= 0) {
-                logger.debug("Capacidade máxima atingida ({}), aguardando slots livres...", 
-                    maxConcurrentPayments);
                 return;
             }
             
@@ -107,18 +105,12 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
             if (!paymentJsonList.isEmpty()) {
                 batchCount.incrementAndGet();
                 
-                logger.debug("Processando lote #{} com {} mensagens (capacidade: {})", 
-                    batchCount.get(), paymentJsonList.size(), availableSlots);
-                
                 // Processa todas as mensagens em paralelo usando Virtual Threads
                 for (String paymentJson : paymentJsonList) {
                     activeTaskCount.incrementAndGet();
                     totalTaskCount.incrementAndGet();
                     virtualThreadExecutor.submit(() -> processPaymentMessage(paymentJson));
                 }
-            } else {
-                // Fila vazia - normal quando não há mensagens
-                logger.trace("Fila {} vazia, aguardando próxima execução", paymentQueueKey);
             }
             
         } catch (Exception e) {
@@ -141,7 +133,7 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
             String firstMessage = redisTemplate.opsForList().rightPop(paymentQueueKey, Duration.ofMillis(blockingTimeoutMs));
             
             if (firstMessage == null) {
-                // Nenhuma mensagem disponível - timeout normal
+
                 return messages;
             }
             
@@ -158,25 +150,14 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
                 messages.add(message);
             }
             
-            // ESTRATÉGIA 3: Log otimizado baseado em métricas do artigo
-            if (messages.size() > 1) {
-                logger.debug("Lote otimizado: {} mensagens (1 blocking + {} rápidas)", 
-                    messages.size(), messages.size() - 1);
-            } else {
-                logger.debug("Processando mensagem única da fila {}", paymentQueueKey);
-            }
-            
+            // Sem logs para máxima performance
             return messages;
             
         } catch (org.springframework.dao.QueryTimeoutException e) {
-            // Timeout é esperado quando fila está vazia - retorna mensagens já lidas
-            logger.debug("Timeout ao aguardar mensagens (normal quando fila vazia), processando {} mensagens", 
-                messages.size());
+
             return messages;
             
         } catch (Exception e) {
-            logger.warn("Erro na leitura otimizada em lote: {}, processando {} mensagens já lidas", 
-                e.getMessage(), messages.size());
             return messages;
         }
     }
@@ -188,20 +169,17 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
      */
     private void processPaymentMessage(String paymentJson) {
         try {
-            logger.debug("Iniciando processamento de mensagem: {}", paymentJson);
-            
             // Deserializa o pagamento
             Payment payment = objectMapper.readValue(paymentJson, Payment.class);
             
             // Processa o pagamento de forma assíncrona
             processPaymentUseCase.processPaymentAsync(payment);
             
-            logger.debug("Processamento de mensagem concluído: correlationId={}", 
-                payment.getCorrelationId());
+ 
                 
         } catch (Exception e) {
-            logger.error("Erro ao processar mensagem de pagamento: paymentJson={}, erro={}", 
-                paymentJson, e.getMessage(), e);
+            // Mantém apenas log de erro com informação mínima
+            logger.error("Erro ao processar mensagem de pagamento: {}", e.getMessage());
         } finally {
             // Decrementa contador de tarefas ativas e incrementa contador de concluídas
             activeTaskCount.decrementAndGet();
