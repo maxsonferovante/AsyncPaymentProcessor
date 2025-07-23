@@ -2,7 +2,7 @@ package com.maal.asyncpaymentprocessor.application.usecase;
 
 import com.maal.asyncpaymentprocessor.adapter.out.paymentprocessor.PaymentProcessorHttpClient;
 import com.maal.asyncpaymentprocessor.adapter.out.redis.RedisHealthCacheRepository;
-import com.maal.asyncpaymentprocessor.application.service.PaymentCounterService;
+import com.maal.asyncpaymentprocessor.application.service.PaymentHistoryService;
 import com.maal.asyncpaymentprocessor.domain.model.HealthStatus;
 import com.maal.asyncpaymentprocessor.domain.model.Payment;
 import com.maal.asyncpaymentprocessor.domain.model.PaymentProcessorType;
@@ -31,16 +31,17 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
     private final PaymentProcessorHttpClient paymentProcessorClient;
     private final RedisHealthCacheRepository healthCacheRepository;
     private final PaymentQueuePublisher paymentQueuePublisher;
-    private final PaymentCounterService paymentCounterService;
+    private final PaymentHistoryService paymentHistoryService;
 
     public ProcessPaymentUseCaseImpl(PaymentProcessorHttpClient paymentProcessorClient,
                                    RedisHealthCacheRepository healthCacheRepository,
                                    PaymentQueuePublisher paymentQueuePublisher,
-                                   PaymentCounterService paymentCounterService) {
+                                   PaymentHistoryService paymentHistoryService
+                                     ) {
         this.paymentProcessorClient = paymentProcessorClient;
         this.healthCacheRepository = healthCacheRepository;
         this.paymentQueuePublisher = paymentQueuePublisher;
-        this.paymentCounterService = paymentCounterService;
+        this.paymentHistoryService = paymentHistoryService;
     }
 
     @Override
@@ -78,9 +79,7 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
                 // Incrementa contadores agregados no Redis para consultas futuras da API
                 PaymentProcessorType usedProcessor = payment.getPaymentProcessorType();
                 if (usedProcessor != null) {
-                    paymentCounterService.incrementCounters(usedProcessor, payment.getAmount());
-                    logger.debug("Contadores incrementados para pagamento processado com sucesso: correlationId={}, processor={}", 
-                        payment.getCorrelationId(), usedProcessor);
+                    paymentHistoryService.recordPayment(payment);
                 }
             } else {
                 // Falha - marca para retry
@@ -122,8 +121,6 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
             
             if (success) {
                 payment.setPaymentProcessorType(processorType);
-                logger.info("Pagamento processado com sucesso: correlationId={}, processor={}", 
-                    payment.getCorrelationId(), payment.getPaymentProcessorType(), payment.getAmount());
             }
             return success;                                                                                    
         } catch (Exception e) {
