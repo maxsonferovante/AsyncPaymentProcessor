@@ -117,25 +117,18 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
         // Verifica se o processador está saudável segundo o cache
         if (!isProcessorHealthy(processorType)) {
             return false;
-        }
-        
-        // Tenta processar com retries
-        for (int attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
-            try {
-                boolean success = paymentProcessorClient.processPayment(payment, processorType);
-                
-                if (success) {
-                    payment.setPaymentProcessorType(processorType);
-                    return true;
-                }
-                                                
-                                    
-            } catch (Exception e) {
-                logger.warn("Erro na tentativa {}/{} com {}: correlationId={}, erro={}", 
-                    attempt, MAX_RETRY_ATTEMPTS, processorType, payment.getCorrelationId(), e.getMessage());
+        }        
+        try {
+            boolean success = paymentProcessorClient.processPayment(payment, processorType);
+            
+            if (success) {
+                payment.setPaymentProcessorType(processorType);
             }
+            return success;                                                                                    
+        } catch (Exception e) {
+            logger.warn("Erro ao processar pagamento com {}: correlationId={}, erro={}", 
+                processorType, payment.getCorrelationId(), e.getMessage());
         }
-        
         return false;
     }
     
@@ -190,9 +183,9 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
             }
             
         } catch (Exception e) {
-            // Se falha ao republicar, marca como FAILED para não travar
-            payment.setStatus(PaymentStatus.FAILED);
-            logger.error("Erro ao tratar falha do pagamento, marcando como FAILED: correlationId={}, erro={}", 
+            // Se falha ao republicar, marca como RETRY para não travar
+            payment.setStatus(PaymentStatus.RETRY);
+            logger.error("Erro ao tratar falha do pagamento, marcando como RETRY: correlationId={}, erro={}", 
                 payment.getCorrelationId(), e.getMessage(), e);
         }
     }

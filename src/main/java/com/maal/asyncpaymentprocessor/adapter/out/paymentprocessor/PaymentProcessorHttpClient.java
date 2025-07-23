@@ -57,7 +57,7 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
             String url = getBaseUrlForType(type) + "/payments/service-health";
             
             // Faz a chamada GET /payments/service-health
-            ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
+            ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class, Map.of("timeout", 4000));
             
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                 Map<String, Object> body = response.getBody();
@@ -127,7 +127,7 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
             
             // Faz a chamada POST /payments
-            ResponseEntity<Map> response = restTemplate.postForEntity(url, request, Map.class);
+            ResponseEntity<Map> response = restTemplate.postForEntity(url, request, Map.class, Map.of("timeout", 4000));
             
             if (response.getStatusCode().is2xxSuccessful()) {
                 return true;
@@ -136,12 +136,18 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
             }
             
         } catch (HttpClientErrorException e) {
+            logger.error("Erro HTTP 4xx processando pagamento {} via {}: {}", 
+                payment.getCorrelationId(), type, e.getMessage(), e);
             return false;
             
         } catch (HttpServerErrorException e) {
+            logger.error("Erro HTTP 5xx processando pagamento {} via {}: {}", 
+                payment.getCorrelationId(), type, e.getMessage(), e);
             return false;
             
         } catch (ResourceAccessException e) {
+            logger.error("Erro de conectividade processando pagamento {} via {}: {}", 
+                payment.getCorrelationId(), type, e.getMessage(), e);
             return false;
             
         } catch (Exception e) {

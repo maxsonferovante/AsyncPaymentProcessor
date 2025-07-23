@@ -20,8 +20,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Worker responsável por consumir pagamentos da fila Redis e processá-los de forma assíncrona.
- * OTIMIZADO: Usa técnicas avançadas de batch reading e pipeline operations baseadas em best practices.
- 
+ * OTIMIZADO: Usa técnicas avançadas de batch reading e pipeline operations baseadas.
  */
 @Component
 public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
@@ -84,14 +83,12 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
     }
     
     /**
-     * Processa um lote de pagamentos usando estratégia otimizada baseada no artigo.
-     * IMPLEMENTA: Técnicas de range reading e pipeline operations para máxima eficiência.
+     * Processa um lote de pagamentos usando estratégia otimizada com processamento em streaming.
+     * OTIMIZADO: Elimina duplo loop - processa mensagens conforme são lidas para menor latência.
      */
     private void processBatchPaymentsOptimized() {
         try {
-            // Calcula capacidade disponível
-            int availableSlots = maxConcurrentPayments - activeTaskCount.get();
-            
+            int availableSlots = maxConcurrentPayments - activeTaskCount.get();            
             if (availableSlots <= 0) {
                 return;
             }
@@ -99,18 +96,11 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
             // Determina tamanho do lote baseado na capacidade disponível
             int currentBatchSize = Math.min(batchSize, availableSlots);
             
-            // Lê mensagens usando estratégia otimizada (baseada no artigo)
-            List<String> paymentJsonList = readBatchOptimized(currentBatchSize);
+            // OTIMIZAÇÃO: Processa mensagens em streaming conforme são lidas
+            int processedCount = readAndProcessStreamOptimized(currentBatchSize);
             
-            if (!paymentJsonList.isEmpty()) {
+            if (processedCount > 0) {
                 batchCount.incrementAndGet();
-                
-                // Processa todas as mensagens em paralelo usando Virtual Threads
-                for (String paymentJson : paymentJsonList) {
-                    activeTaskCount.incrementAndGet();
-                    totalTaskCount.incrementAndGet();
-                    virtualThreadExecutor.submit(() -> processPaymentMessage(paymentJson));
-                }
             }
             
         } catch (Exception e) {
@@ -119,47 +109,60 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
     }
     
     /**
-     * Lê mensagens em lote usando estratégia otimizada baseada no artigo Medium.
-     * IMPLEMENTA: Técnica híbrida eficiente e robusta para máximo throughput.
+     * Lê e processa mensagens em streaming - OTIMIZAÇÃO: elimina duplo loop.
+     * IMPLEMENTA: Processamento imediato para menor latência e menor uso de memória.
      * 
-     * @param maxMessages Número máximo de mensagens para ler
-     * @return Lista de JSONs dos pagamentos
+     * @param maxMessages Número máximo de mensagens para ler e processar
+     * @return Número de mensagens processadas
      */
-    private List<String> readBatchOptimized(int maxMessages) {
-        List<String> messages = new java.util.ArrayList<>();
+    private int readAndProcessStreamOptimized(int maxMessages) {
+        int processedCount = 0;
         
         try {
             // ESTRATÉGIA 1: Operação blocking para primeira mensagem
             String firstMessage = redisTemplate.opsForList().rightPop(paymentQueueKey, Duration.ofMillis(blockingTimeoutMs));
             
             if (firstMessage == null) {
-
-                return messages;
+                return 0;
             }
             
-            messages.add(firstMessage);
+            // Processa primeira mensagem imediatamente
+            submitPaymentForProcessing(firstMessage);
+            processedCount++;
             
-            // ESTRATÉGIA 2: Se temos uma mensagem, lê rapidamente as demais
-            // Baseado no artigo: operações sequenciais rápidas são eficientes
+            // ESTRATÉGIA 2: Se temos uma mensagem, lê e processa rapidamente as demais
+            // OTIMIZADO: Processa conforme lê para eliminar duplo loop
             for (int i = 1; i < maxMessages; i++) {
                 String message = redisTemplate.opsForList().rightPop(paymentQueueKey);
                 if (message == null) {
-                    // Não há mais mensagens disponíveis
                     break;
                 }
-                messages.add(message);
+                // Processa mensagem imediatamente - não armazena em lista
+                submitPaymentForProcessing(message);
+                processedCount++;
             }
             
-            // Sem logs para máxima performance
-            return messages;
+            return processedCount;
             
         } catch (org.springframework.dao.QueryTimeoutException e) {
-
-            return messages;
-            
+            logger.error("Timeout ao ler mensagens da fila: {}", e.getMessage());
+            return processedCount;            
         } catch (Exception e) {
-            return messages;
+            logger.error("Erro ao ler mensagens da fila: {}", e.getMessage());
+            return processedCount;
         }
+    }
+    
+    /**
+     * Submete uma mensagem de pagamento para processamento assíncrono.
+     * HELPER: Extrai lógica de submissão para reutilização e clareza.
+     * 
+     * @param paymentJson JSON do pagamento a ser processado
+     */
+    private void submitPaymentForProcessing(String paymentJson) {
+        activeTaskCount.incrementAndGet();
+        totalTaskCount.incrementAndGet();
+        virtualThreadExecutor.submit(() -> processPaymentMessage(paymentJson));
     }
     
     /**
@@ -173,9 +176,7 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
             Payment payment = objectMapper.readValue(paymentJson, Payment.class);
             
             // Processa o pagamento de forma assíncrona
-            processPaymentUseCase.processPaymentAsync(payment);
-            
- 
+            processPaymentUseCase.processPaymentAsync(payment);                 
                 
         } catch (Exception e) {
             // Mantém apenas log de erro com informação mínima
