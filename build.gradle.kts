@@ -27,9 +27,6 @@ dependencies {
     }
     implementation("io.netty:netty-all:4.2.3.Final")
 
-    // Cliente HTTP (RestTemplate) - servidor web desabilitado via application.properties
-    implementation("org.springframework.boot:spring-boot-starter-web")
-    
     // Jackson para serialização JSON (ainda necessário para Redis)
     implementation("com.fasterxml.jackson.core:jackson-databind")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
@@ -60,7 +57,12 @@ tasks.withType<JavaExec> {
 tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
     jvmArgs(
         "--sun-misc-unsafe-memory-access=allow",
-        "--enable-native-access=ALL-UNNAMED"
+        "--enable-native-access=ALL-UNNAMED",
+        // logs
+        "-Dlogging.level.org.springframework.web=DEBUG",
+        "-Dlogging.level.org.springframework.web.servlet.DispatcherServlet=DEBUG",
+        "-Dlogging.level.org.springframework.web.filter.CommonsRequestLoggingFilter=DEBUG",
+        "-Dlogging.level.org.springframework.web.filter.CommonsRequestLoggingFilter=DEBUG",
     )
 }
 

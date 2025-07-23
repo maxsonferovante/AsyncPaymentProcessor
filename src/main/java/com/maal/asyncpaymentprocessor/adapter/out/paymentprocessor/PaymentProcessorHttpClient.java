@@ -1,5 +1,6 @@
 package com.maal.asyncpaymentprocessor.adapter.out.paymentprocessor;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.maal.asyncpaymentprocessor.domain.model.HealthStatus;
 import com.maal.asyncpaymentprocessor.domain.model.Payment;
 import com.maal.asyncpaymentprocessor.domain.model.PaymentProcessorType;
@@ -7,13 +8,15 @@ import com.maal.asyncpaymentprocessor.domain.port.out.PaymentProcessorPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.RestTemplate;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -21,7 +24,7 @@ import java.util.Optional;
 
 /**
  * Adaptador HTTP para comunicação com os Payment Processors (Default e Fallback).
- * Implementa as chamadas para processamento de pagamentos e health check usando RestTemplate.
+ * Implementa as chamadas para processamento de pagamentos e health check usando HttpClient (java.net.http).
  * Refatorado para usar HTTP síncrono e mais confiável.
  */
 @Component
@@ -35,14 +38,12 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
     @Value("${app.payment-processor.fallback.url}")
     private String FALLBACK_PROCESSOR_URL;
     
-    private final RestTemplate restTemplate;
-    
-    public PaymentProcessorHttpClient() {
-        // Cria RestTemplate configurado com timeouts apropriados
-        this.restTemplate = new RestTemplate();
-        
-        // Configurações de timeout mais generosas para evitar falhas
-        // O timeout será gerenciado por configurações do HTTP client se necessário
+    private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
+
+    public PaymentProcessorHttpClient(HttpClient httpClient, ObjectMapper objectMapper) {
+        this.httpClient = httpClient;
+        this.objectMapper = objectMapper;
     }
     
     /**
@@ -55,47 +56,44 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
     public Optional<HealthStatus> getHealthStatus(PaymentProcessorType type) {
         try {
             String url = getBaseUrlForType(type) + "/payments/service-health";
-            
-            // Faz a chamada GET /payments/service-health
-            ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class, Map.of("timeout", 4000));
-            
-            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                Map<String, Object> body = response.getBody();
-                Boolean failing = (Boolean) body.get("failing");
-                Integer minResponseTime = (Integer) body.get("minResponseTime");
-                
-                HealthStatus healthStatus = new HealthStatus(
-                    failing != null ? failing : false,
-                    minResponseTime != null ? minResponseTime : 0,
-                    Instant.now()
-                );
-                
-                return Optional.of(healthStatus);
-            }
-            
-            logger.warn("Health check {} retornou resposta inválida: status={}", 
-                type, response.getStatusCode());
-            return Optional.empty();
-            
-        } catch (HttpClientErrorException e) {
-            // Se for HTTP 429 (Too Many Requests), retorna empty para respeitar rate limit
-            if (e.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS) {
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofMillis(4000))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == HttpStatus.TOO_MANY_REQUESTS.value()) {
                 logger.debug("Rate limit atingido para health check {}: HTTP 429", type);
                 return Optional.empty();
             }
-            logger.warn("Erro HTTP 4xx no health check {}: {} {}", 
-                type, e.getStatusCode(), e.getMessage());
+
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                Map<String, Object> body = objectMapper.readValue(response.body(), Map.class);
+                Boolean failing = (Boolean) body.get("failing");
+                Integer minResponseTime = (Integer) body.get("minResponseTime");
+
+                HealthStatus healthStatus = new HealthStatus(
+                        failing != null ? failing : false,
+                        minResponseTime != null ? minResponseTime : 0,
+                        Instant.now()
+                );
+
+                return Optional.of(healthStatus);
+            }
+
+            logger.warn("Health check {} retornou resposta inválida: status={}", type, response.statusCode());
             return Optional.empty();
-            
-        } catch (HttpServerErrorException e) {
-            logger.warn("Erro HTTP 5xx no health check {}: {} {}", 
-                type, e.getStatusCode(), e.getMessage());
+
+        } catch (HttpTimeoutException e) {
+            logger.warn("Timeout no health check {}: {}", type, e.getMessage());
             return Optional.empty();
-            
-        } catch (ResourceAccessException e) {
-            logger.warn("Erro de conectividade no health check {}: {}", type, e.getMessage());
+        } catch (IOException | InterruptedException e) {
+            logger.warn("Erro de I/O no health check {}: {}", type, e.getMessage());
+            Thread.currentThread().interrupt();
             return Optional.empty();
-            
         } catch (Exception e) {
             logger.error("Erro inesperado no health check {}: {}", type, e.getMessage(), e);
             return Optional.empty();
@@ -112,47 +110,36 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
     public boolean processPayment(Payment payment, PaymentProcessorType type) {
         try {
             String url = getBaseUrlForType(type) + "/payments";
-            
-            // Constrói o payload da requisição
+
+            // Monta o corpo JSON
             Map<String, Object> requestBody = Map.of(
-                "correlationId", payment.getCorrelationId().toString(),
-                "amount", payment.getAmount(),
-                "requestedAt", payment.getRequestedAt().toString()
+                    "correlationId", payment.getCorrelationId().toString(),
+                    "amount", payment.getAmount(),
+                    "requestedAt", payment.getRequestedAt().toString()
             );
-            
-            // Configura headers
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-            
-            // Faz a chamada POST /payments
-            ResponseEntity<Map> response = restTemplate.postForEntity(url, request, Map.class, Map.of("timeout", 4000));
-            
-            if (response.getStatusCode().is2xxSuccessful()) {
-                return true;
-            } else {
-                return false;
-            }
-            
-        } catch (HttpClientErrorException e) {
-            logger.error("Erro HTTP 4xx processando pagamento {} via {}: {}", 
-                payment.getCorrelationId(), type, e.getMessage(), e);
+
+            String jsonBody = objectMapper.writeValueAsString(requestBody);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofMillis(4000))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .build();
+
+            HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+
+            return response.statusCode() >= 200 && response.statusCode() < 300;
+
+        } catch (HttpTimeoutException e) {
+            logger.error("Timeout processando pagamento {} via {}: {}", payment.getCorrelationId(), type, e.getMessage());
             return false;
-            
-        } catch (HttpServerErrorException e) {
-            logger.error("Erro HTTP 5xx processando pagamento {} via {}: {}", 
-                payment.getCorrelationId(), type, e.getMessage(), e);
+        } catch (IOException | InterruptedException e) {
+            logger.error("Erro de I/O processando pagamento {} via {}: {}", payment.getCorrelationId(), type, e.getMessage());
+            Thread.currentThread().interrupt();
             return false;
-            
-        } catch (ResourceAccessException e) {
-            logger.error("Erro de conectividade processando pagamento {} via {}: {}", 
-                payment.getCorrelationId(), type, e.getMessage(), e);
-            return false;
-            
         } catch (Exception e) {
-            logger.error("Erro inesperado processando pagamento {} via {}: {}", 
-                payment.getCorrelationId(), type, e.getMessage(), e);
+            logger.error("Erro inesperado processando pagamento {} via {}: {}", payment.getCorrelationId(), type, e.getMessage(), e);
             return false;
         }
     }
