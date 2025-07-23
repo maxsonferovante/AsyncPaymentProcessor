@@ -12,7 +12,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -70,7 +69,8 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
      * OTIMIZADO: Usa estratégia híbrida baseada no artigo Medium para máximo throughput.
      * Frequência configurável via propriedade rinha.worker.execution-delay.
      */
-    @Scheduled(fixedDelayString = "${rinha.worker.execution-delay}")
+    // Troca fixedDelay -> fixedRate para iniciar ciclos em intervalos fixos
+    @Scheduled(fixedRateString = "${rinha.worker.execution-delay}")
     @Override
     public void execute() {
         try {
@@ -119,11 +119,11 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
         int processedCount = 0;
         
         try {
-            // ESTRATÉGIA 1: Operação blocking para primeira mensagem
-            String firstMessage = redisTemplate.opsForList().rightPop(paymentQueueKey, Duration.ofMillis(blockingTimeoutMs));
+            // ESTRATÉGIA 1: Tenta obter primeira mensagem sem bloqueio
+            String firstMessage = redisTemplate.opsForList().rightPop(paymentQueueKey);
             
             if (firstMessage == null) {
-                return 0;
+                return processedCount;
             }
             
             // Processa primeira mensagem imediatamente
@@ -135,6 +135,7 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
             for (int i = 1; i < maxMessages; i++) {
                 String message = redisTemplate.opsForList().rightPop(paymentQueueKey);
                 if (message == null) {
+                    // Fila vazia, sai do loop
                     break;
                 }
                 // Processa mensagem imediatamente - não armazena em lista

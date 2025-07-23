@@ -74,8 +74,7 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
             
             if (processed) {
                 // Sucesso - pagamento processado no Payment Processor
-                payment.setStatus(PaymentStatus.SUCCESS);
-                
+                payment.setStatus(PaymentStatus.SUCCESS);                
                 // Incrementa contadores agregados no Redis para consultas futuras da API
                 PaymentProcessorType usedProcessor = payment.getPaymentProcessorType();
                 if (usedProcessor != null) {
@@ -123,6 +122,8 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
             
             if (success) {
                 payment.setPaymentProcessorType(processorType);
+                logger.info("Pagamento processado com sucesso: correlationId={}, processor={}", 
+                    payment.getCorrelationId(), payment.getPaymentProcessorType(), payment.getAmount());
             }
             return success;                                                                                    
         } catch (Exception e) {

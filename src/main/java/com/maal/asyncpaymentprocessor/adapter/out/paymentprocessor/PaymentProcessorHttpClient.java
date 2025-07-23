@@ -40,7 +40,7 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
     
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
-
+    
     public PaymentProcessorHttpClient(HttpClient httpClient, ObjectMapper objectMapper) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
@@ -56,7 +56,7 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
     public Optional<HealthStatus> getHealthStatus(PaymentProcessorType type) {
         try {
             String url = getBaseUrlForType(type) + "/payments/service-health";
-
+            
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .timeout(Duration.ofMillis(4000))
@@ -74,19 +74,19 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
                 Map<String, Object> body = objectMapper.readValue(response.body(), Map.class);
                 Boolean failing = (Boolean) body.get("failing");
                 Integer minResponseTime = (Integer) body.get("minResponseTime");
-
+                
                 HealthStatus healthStatus = new HealthStatus(
-                        failing != null ? failing : false,
-                        minResponseTime != null ? minResponseTime : 0,
-                        Instant.now()
+                    failing != null ? failing : false,
+                    minResponseTime != null ? minResponseTime : 0,
+                    Instant.now()
                 );
-
+                
                 return Optional.of(healthStatus);
             }
-
+            
             logger.warn("Health check {} retornou resposta inválida: status={}", type, response.statusCode());
             return Optional.empty();
-
+            
         } catch (HttpTimeoutException e) {
             logger.warn("Timeout no health check {}: {}", type, e.getMessage());
             return Optional.empty();
@@ -110,14 +110,14 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
     public boolean processPayment(Payment payment, PaymentProcessorType type) {
         try {
             String url = getBaseUrlForType(type) + "/payments";
-
+            
             // Monta o corpo JSON
             Map<String, Object> requestBody = Map.of(
-                    "correlationId", payment.getCorrelationId().toString(),
-                    "amount", payment.getAmount(),
-                    "requestedAt", payment.getRequestedAt().toString()
+                "correlationId", payment.getCorrelationId().toString(),
+                "amount", payment.getAmount(),
+                "requestedAt", payment.getRequestedAt().toString()
             );
-
+            
             String jsonBody = objectMapper.writeValueAsString(requestBody);
 
             HttpRequest request = HttpRequest.newBuilder()
