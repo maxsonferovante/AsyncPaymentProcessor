@@ -23,7 +23,7 @@ public class RedisHealthCacheRepository {
     
     private static final Logger logger = LoggerFactory.getLogger(RedisHealthCacheRepository.class);
     private static final String HEALTH_CACHE_KEY_PREFIX = "payment_processor_health:";
-    private static final Duration CACHE_TTL = Duration.ofSeconds(4); // Cache válido por 4 segundos
+    private static final Duration CACHE_TTL = Duration.ofMillis(4900); // Cache válido por 4 segundos
     
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;

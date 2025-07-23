@@ -35,7 +35,7 @@ public class HealthCheckOrchestratorImpl implements HealthCheckOrchestrator {
      * Agenda verificações de health check a cada 4 segundos.
      * Conforme especificado na documentação da Rinha, o limite é de 1 chamada a cada 4 segundos.
      */
-    @Scheduled(fixedDelay = 4000) // 4 segundos entre execuções
+    @Scheduled(fixedDelay = 4900) // 4 segundos entre execuções
     @Override
     public void scheduleHealthChecks() {
         // Executa as verificações de health check de forma assíncrona para ambos os processadores
