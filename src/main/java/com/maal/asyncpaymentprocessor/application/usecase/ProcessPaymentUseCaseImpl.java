@@ -25,8 +25,8 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
 
     private static final Logger logger = LoggerFactory.getLogger(ProcessPaymentUseCaseImpl.class);
     
-    // Configurações de retry e circuit breaker
-    private static final int MAX_RETRY_ATTEMPTS = 2;
+    // Configurações de retry otimizadas para recursos limitados
+    private static final int MAX_RETRY_ATTEMPTS = 1; // Reduzido para evitar sobrecarga
    
     private final PaymentProcessorHttpClient paymentProcessorClient;
     private final RedisHealthCacheRepository healthCacheRepository;
@@ -141,8 +141,9 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
     
     /**
      * Verifica se um processador está saudável baseado no cache Redis.
+     * OTIMIZADO: Se não há informação, permite tentar para não bloquear processamento.
      * @param processorType Tipo do processador
-     * @return true se estiver saudável, false caso contrário
+     * @return true se estiver saudável ou sem informação, false apenas se confirmadamente falhando
      */
     private boolean isProcessorHealthy(PaymentProcessorType processorType) {
         try {
@@ -152,36 +153,46 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
                 boolean healthy = !healthStatus.get().isFailing();
                 return healthy;
             } else {
-                // Se não há informação de health no cache, assume o fallback
-                return false;
+                // MUDANÇA CRÍTICA: Se não há informação de health no cache, assume healthy
+                // para não bloquear todo o processamento em recursos limitados
+                logger.debug("Sem informação de health para {}, assumindo healthy", processorType);
+                return true;
             }
             
         } catch (Exception e) {
             logger.warn("Erro ao verificar health status para {}: {}", processorType, e.getMessage());
-            // Em caso de erro, assume o fallback para não bloquear processamento
-            return false;
+            // Em caso de erro, assume healthy para não bloquear processamento
+            return true;
         }
     }
     
     /**
-     * Trata falha de processamento, decidindo entre retry ou falha definitiva.
+     * Trata falha de processamento - SIMPLIFICADO para recursos limitados.
+     * OTIMIZAÇÃO: Evita republishing excessivo que causa loops e sobrecarga.
      * @param payment Pagamento que falhou
      */
     private void handlePaymentFailure(Payment payment) {
         try {
             payment.setRetryCount(payment.getRetryCount() + 1);
             
-            // Se ainda pode tentar retry
-            if (payment.getRetryCount() < MAX_RETRY_ATTEMPTS) {
+            // OTIMIZAÇÃO: Reduz retries para evitar sobrecarga em recursos limitados
+            // Se já tentou mais que o limite, marca como FAILED e para
+            if (payment.getRetryCount() >= MAX_RETRY_ATTEMPTS) {
+                payment.setStatus(PaymentStatus.FAILED);
+                logger.debug("Pagamento marcado como FAILED após {} tentativas: correlationId={}", 
+                    payment.getRetryCount(), payment.getCorrelationId());
+            } else {
+                // Apenas um retry, evita loops infinitos
                 payment.setStatus(PaymentStatus.RETRY);
                 paymentQueuePublisher.publish(payment);
-            } else {
-                // Esgotou tentativas - falha definitiva
-                payment.setStatus(PaymentStatus.FAILED);
+                logger.debug("Pagamento republicado para retry {}/{}: correlationId={}", 
+                    payment.getRetryCount(), MAX_RETRY_ATTEMPTS, payment.getCorrelationId());
             }
             
         } catch (Exception e) {
-            logger.error("Erro ao tratar falha do pagamento: correlationId={}, erro={}", 
+            // Se falha ao republicar, marca como FAILED para não travar
+            payment.setStatus(PaymentStatus.FAILED);
+            logger.error("Erro ao tratar falha do pagamento, marcando como FAILED: correlationId={}, erro={}", 
                 payment.getCorrelationId(), e.getMessage(), e);
         }
     }
