@@ -18,7 +18,7 @@ RUN ./gradlew nativeCompile \
     --console=plain \
     -Dorg.gradle.jvmargs="-Xmx3g" \
     -Pspring.aot.jvmArgs="-Xmx1g" \
-    -Pspring.native.gradle.build-args="-O3,--gc=G1,--enable-preview,--strict-image-heap"
+    -Pspring.native.gradle.build-args="-O3,--gc=G1,--enable-preview,--strict-image-heap,--enable-native-access=ALL-UNNAMED"
 
 # Runtime
 FROM redhat/ubi9-minimal:latest AS runtime
