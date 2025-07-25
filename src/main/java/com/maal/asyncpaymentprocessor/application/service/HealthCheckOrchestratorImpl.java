@@ -7,11 +7,14 @@ import com.maal.asyncpaymentprocessor.domain.port.in.HealthCheckOrchestrator;
 import com.maal.asyncpaymentprocessor.domain.port.out.PaymentProcessorPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.integration.redis.util.RedisLockRegistry;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.locks.Lock;
 
 /**
  * Orquestrador responsável por monitorar a saúde dos Payment Processors.
@@ -22,41 +25,65 @@ public class HealthCheckOrchestratorImpl implements HealthCheckOrchestrator {
 
     private static final Logger logger = LoggerFactory.getLogger(HealthCheckOrchestratorImpl.class);
 
+    private final RedisLockRegistry redisLockRegistry;
     private final RedisHealthCacheRepository redisHealthCacheRepository;
     private final PaymentProcessorPort paymentProcessorPort;
 
-    public HealthCheckOrchestratorImpl(RedisHealthCacheRepository redisHealthCacheRepository,
+    public HealthCheckOrchestratorImpl(
+                                        RedisLockRegistry redisLockRegistry,
+                                        RedisHealthCacheRepository redisHealthCacheRepository,
                                        PaymentProcessorPort paymentProcessorPort) {
+        this.redisLockRegistry = redisLockRegistry;
         this.redisHealthCacheRepository = redisHealthCacheRepository;
         this.paymentProcessorPort = paymentProcessorPort;
     }
 
     /**
-     * Agenda verificações de health check a cada 4 segundos.
-     * Conforme especificado na documentação da Rinha, o limite é de 1 chamada a cada 4 segundos.
+     * Agenda verificações de health check a cada 4998ms, sob um lock distribuído.
+     * Apenas a instância líder (que adquire o lock) executa a verificação.
      */
-    @Scheduled(fixedDelay = 4900) // 4 segundos entre execuções
+    @Scheduled(fixedDelay = 4998) // Mantido em 4.998 segundos para evitar 429
     @Override
     public void scheduleHealthChecks() {
-        // Executa as verificações de health check de forma assíncrona para ambos os processadores
-        CompletableFuture<Void> defaultCheck = CompletableFuture.runAsync(() -> 
-            checkHealthAndUpdateCache(PaymentProcessorType.DEFAULT)
-        );
-        
-        CompletableFuture<Void> fallbackCheck = CompletableFuture.runAsync(() -> 
-            checkHealthAndUpdateCache(PaymentProcessorType.FALLBACK)
-        );
-        
-        // Aguarda ambas as verificações completarem (sem bloquear a thread principal por muito tempo)
+        // Chave única para o lock desta tarefa específica
+        Lock lock = redisLockRegistry.obtain("global-health-check-leader-task");
+        boolean locked = false;
         try {
-            CompletableFuture.allOf(defaultCheck, fallbackCheck)
-                .get(java.util.concurrent.TimeUnit.SECONDS.toMillis(4), 
-                     java.util.concurrent.TimeUnit.MILLISECONDS); // Timeout de 4 segundos
+            // Tenta adquirir o lock imediatamente. Se outra instância já o tem, retorna false.
+            locked = lock.tryLock();
+            if (locked) {
+                logger.info("Instância líder adquiriu o lock para health check. Executando verificação.");
+
+                // --- Lógica existente de verificação de health check ---
+                CompletableFuture<Void> defaultCheck = CompletableFuture.runAsync(() ->
+                        checkHealthAndUpdateCache(PaymentProcessorType.DEFAULT)
+                );
+
+                CompletableFuture<Void> fallbackCheck = CompletableFuture.runAsync(() ->
+                        checkHealthAndUpdateCache(PaymentProcessorType.FALLBACK)
+                );
+
+                CompletableFuture.allOf(defaultCheck, fallbackCheck)
+                        .get(Duration.ofSeconds(5).toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS); // Timeout de 5 segundos para as chamadas
+
+            } else {
+                logger.info("Instância não líder, lock não adquirido para health check. Pulando execução.");
+            }
         } catch (Exception e) {
-            logger.warn("Timeout ou erro durante as verificações de health check: {}", e.getMessage());
+            logger.error("Erro inesperado durante tentativa de adquirir lock ou executar health check: {}", e.getMessage(), e);
+            // Se ocorrer um erro, não remove o cache, pois pode ser um erro temporário de comunicação
+            // apenas abandona a execução desta instância
+        } finally {
+            if (locked) {
+                try {
+                    lock.unlock(); // É crucial liberar o lock após a execução (ou falha)
+                    logger.debug("Lock de health check liberado.");
+                } catch (Exception e) {
+                    logger.error("Erro ao liberar lock de health check: {}", e.getMessage(), e);
+                }
+            }
         }
     }
-    
     /**
      * Verifica a saúde de um Payment Processor específico e atualiza o cache.
      * @param processorType Tipo do Payment Processor a ser verificado
@@ -68,13 +95,9 @@ public class HealthCheckOrchestratorImpl implements HealthCheckOrchestrator {
             
             if (healthStatusOpt.isPresent()) {
                 HealthStatus healthStatus = healthStatusOpt.get();
-                
-                // Atualiza o cache Redis com o status de saúde
                 redisHealthCacheRepository.saveHealthStatus(processorType, healthStatus);
-                    
             } else {
                 logger.warn("Não foi possível obter health status do Payment Processor: {}", processorType);
-                
                 // Remove entry inválida do cache se existir
                 redisHealthCacheRepository.removeHealthStatus(processorType);
             }

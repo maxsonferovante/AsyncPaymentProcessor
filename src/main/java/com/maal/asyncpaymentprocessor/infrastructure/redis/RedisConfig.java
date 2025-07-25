@@ -1,15 +1,15 @@
 package com.maal.asyncpaymentprocessor.infrastructure.redis;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.DeserializationFeature;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
+import org.springframework.integration.redis.util.RedisLockRegistry;
 import org.springframework.scheduling.annotation.EnableScheduling;
+
+import java.time.Duration;
 
 /**
  * Configuração do Redis para cache de health status e filas de pagamentos.
@@ -43,32 +43,14 @@ public class RedisConfig {
         template.afterPropertiesSet();
         return template;
     }
-    
-    /**
-     * Configura ObjectMapper para serialização JSON.
-     * Otimizado para serializar objetos Payment e HealthStatus.
-     * Configurado especificamente para compatibilidade com GraalVM Native Image.
-     */
+
     @Bean
-    public ObjectMapper objectMapper() {
-        ObjectMapper mapper = new ObjectMapper();
-        
-        // Adiciona suporte para Java 8+ Time API (Instant, LocalDateTime, etc.)
-        mapper.registerModule(new JavaTimeModule());
-        
-        // Configurações para melhor performance e compatibilidade
-        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        mapper.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
-        
-        // Configurações específicas para GraalVM Native Image
-        mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
-        mapper.configure(DeserializationFeature.FAIL_ON_INVALID_SUBTYPE, false);
-        mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, false);
-        
-        // Configurações para melhorar a performance
-        mapper.configure(SerializationFeature.WRITE_SINGLE_ELEM_ARRAYS_UNWRAPPED, false);
-        mapper.configure(DeserializationFeature.ACCEPT_SINGLE_VALUE_AS_ARRAY, true);
-        
-        return mapper;
+    public RedisLockRegistry redisLockRegistry(RedisConnectionFactory connectionFactory) {
+        // O segundo parâmetro é o "key prefix" para os locks no Redis
+        // O terceiro parâmetro é o "expire after" em milissegundos.
+        // Deve ser maior que o tempo de execução da tarefa agendada (4.9s)
+        // e suficiente para permitir failover em caso de falha do líder.
+        // Ex: 5 segundos (task) + 7 segundos (margem) = 12 segundos
+        return new RedisLockRegistry(connectionFactory, "healthcheck-leader-lock-registry", Duration.ofSeconds(12).toMillis());
     }
 }

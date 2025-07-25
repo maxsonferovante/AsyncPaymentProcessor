@@ -22,6 +22,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-redis") {
         exclude(group = "io.netty")
     }
+    implementation("org.springframework.integration:spring-integration-redis")
+
     implementation("org.springframework.boot:spring-boot-starter-web") {
         exclude(group = "io.netty")
     }
