@@ -22,12 +22,7 @@ import java.util.Optional;
  */
 @Service
 public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
-
     private static final Logger logger = LoggerFactory.getLogger(ProcessPaymentUseCaseImpl.class);
-    
-    // Configurações de retry otimizadas para recursos limitados
-    private static final int MAX_RETRY_ATTEMPTS = 1; // Reduzido para evitar sobrecarga
-   
     private final PaymentProcessorHttpClient paymentProcessorClient;
     private final RedisHealthCacheRepository healthCacheRepository;
     private final PaymentQueuePublisher paymentQueuePublisher;
@@ -44,29 +39,13 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
         this.paymentHistoryService = paymentHistoryService;
     }
 
-    @Override
-    public void receivePayment(Payment payment) {
-        try {
-            // Define status inicial como PENDING
-            payment.setStatus(PaymentStatus.PENDING);
-            
-            // Publica na fila para processamento assíncrono (SEM PERSISTÊNCIA LOCAL)
-            paymentQueuePublisher.publish(payment);
-                
-        } catch (Exception e) {
-            logger.error("Erro ao processar recebimento do pagamento: correlationId={}, erro={}", 
-                payment.getCorrelationId(), e.getMessage(), e);
-            throw e;
-        }
-    }
-    
     /**
      * Processa um pagamento de forma assíncrona (chamado pelo worker).
      * Implementa a lógica de escolha de processador, retries e circuit breaker.
      * NOVA ABORDAGEM: Sem persistência local - apenas processamento nos Payment Processors + contadores agregados Redis.
      * @param payment Pagamento a ser processado
      */
-    public void processPaymentAsync(Payment payment) {
+    public boolean processPaymentAsync(Payment payment) {
         try {
             payment.setStatus(PaymentStatus.PROCESSING);
             
@@ -85,9 +64,10 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
                 // Falha - marca para retry
                 handlePaymentFailure(payment);
             }
-            
+            return processed;
         } catch (Exception _) {
             handlePaymentFailure(payment);
+            return false;
         }
     }
     
@@ -141,11 +121,9 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
             Optional<HealthStatus> healthStatus = healthCacheRepository.getHealthStatus(processorType);
             
             if (healthStatus.isPresent()) {
-                boolean healthy = !healthStatus.get().isFailing();
-                return healthy;
+                return !healthStatus.get().isFailing();
             } else {
                 // MUDANÇA CRÍTICA: Se não há informação de health no cache, assume healthy
-                // para não bloquear todo o processamento em recursos limitados
                 logger.debug("Sem informação de health para {}, assumindo healthy", processorType);
                 return true;
             }
@@ -158,33 +136,18 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
     }
     
     /**
-     * Trata falha de processamento - SIMPLIFICADO para recursos limitados.
-     * OTIMIZAÇÃO: Evita republishing excessivo que causa loops e sobrecarga.
+     * Trata falha de processamento
      * @param payment Pagamento que falhou
      */
     private void handlePaymentFailure(Payment payment) {
         try {
             payment.setRetryCount(payment.getRetryCount() + 1);
-            
-            // OTIMIZAÇÃO: Reduz retries para evitar sobrecarga em recursos limitados
-            // Se já tentou mais que o limite, marca como FAILED e para
-            if (payment.getRetryCount() >= MAX_RETRY_ATTEMPTS) {
-                payment.setStatus(PaymentStatus.FAILED);
-                logger.debug("Pagamento marcado como FAILED após {} tentativas: correlationId={}", 
-                    payment.getRetryCount(), payment.getCorrelationId());
-            } else {
-                // Apenas um retry, evita loops infinitos
-                payment.setStatus(PaymentStatus.RETRY);
-                paymentQueuePublisher.publish(payment);
-                logger.debug("Pagamento republicado para retry {}/{}: correlationId={}", 
-                    payment.getRetryCount(), MAX_RETRY_ATTEMPTS, payment.getCorrelationId());
-            }
-            
-        } catch (Exception e) {
-            // Se falha ao republicar, marca como RETRY para não travar
             payment.setStatus(PaymentStatus.RETRY);
-            logger.error("Erro ao tratar falha do pagamento, marcando como RETRY: correlationId={}, erro={}", 
-                payment.getCorrelationId(), e.getMessage(), e);
+            paymentQueuePublisher.publish(payment);
+        } catch (Exception e) {
+            logger.warn("Erro ao processar pagamento: {} - {}", payment.getCorrelationId(), e.getMessage());
+            payment.setStatus(PaymentStatus.RETRY);
+            paymentQueuePublisher.publish(payment);
         }
     }
 }

@@ -30,10 +30,6 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
     @Value("${rinha.queue.payments-main}")
     private String paymentQueueKey;
     
-    // Configurações do worker - todas configuráveis via properties/environment
-    @Value("${rinha.worker.blocking-timeout}")
-    private int blockingTimeoutMs; // Timeout para operações blocking Redis (ms)
-    
     @Value("${rinha.worker.max-concurrent-payments}")
     private int maxConcurrentPayments; // Máximo de pagamentos processados concorrentemente
     
@@ -46,8 +42,6 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
     private final ExecutorService virtualThreadExecutor;
     private final AtomicInteger activeTaskCount;
     private final AtomicLong completedTaskCount;
-    private final AtomicLong totalTaskCount;
-    private final AtomicLong batchCount; // Métrica para monitoramento
 
     public PaymentProcessorWorkerImpl(RedisTemplate<String, String> redisTemplate,
                                     ObjectMapper objectMapper,
@@ -57,8 +51,6 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
         this.processPaymentUseCase = processPaymentUseCase;
         this.activeTaskCount = new AtomicInteger(0);
         this.completedTaskCount = new AtomicLong(0);
-        this.totalTaskCount = new AtomicLong(0);
-        this.batchCount = new AtomicLong(0);
         
         // Configura Virtual Thread Executor para processamento assíncrono
         this.virtualThreadExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -92,17 +84,8 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
             if (availableSlots <= 0) {
                 return;
             }
-            
-            // Determina tamanho do lote baseado na capacidade disponível
             int currentBatchSize = Math.min(batchSize, availableSlots);
-            
-            // OTIMIZAÇÃO: Processa mensagens em streaming conforme são lidas
-            int processedCount = readAndProcessStreamOptimized(currentBatchSize);
-            
-            if (processedCount > 0) {
-                batchCount.incrementAndGet();
-            }
-            
+            readAndProcessStreamOptimized(currentBatchSize);
         } catch (Exception e) {
             logger.error("Erro ao processar lote otimizado: {}", e.getMessage(), e);
         }
@@ -115,21 +98,16 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
      * @param maxMessages Número máximo de mensagens para ler e processar
      * @return Número de mensagens processadas
      */
-    private int readAndProcessStreamOptimized(int maxMessages) {
-        int processedCount = 0;
+    private void readAndProcessStreamOptimized(int maxMessages) {
         
         try {
             // ESTRATÉGIA 1: Tenta obter primeira mensagem sem bloqueio
             String firstMessage = redisTemplate.opsForList().rightPop(paymentQueueKey);
-            
             if (firstMessage == null) {
-                return processedCount;
+                return;
             }
-            
             // Processa primeira mensagem imediatamente
             submitPaymentForProcessing(firstMessage);
-            processedCount++;
-            
             // ESTRATÉGIA 2: Se temos uma mensagem, lê e processa rapidamente as demais
             // OTIMIZADO: Processa conforme lê para eliminar duplo loop
             for (int i = 1; i < maxMessages; i++) {
@@ -140,20 +118,13 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
                 }
                 // Processa mensagem imediatamente - não armazena em lista
                 submitPaymentForProcessing(message);
-                processedCount++;
             }
-            
-            return processedCount;
-            
         } catch (org.springframework.dao.QueryTimeoutException e) {
             logger.error("Timeout ao ler mensagens da fila: {}", e.getMessage());
-            return processedCount;            
         } catch (Exception e) {
             logger.error("Erro ao ler mensagens da fila: {}", e.getMessage());
-            return processedCount;
         }
     }
-    
     /**
      * Submete uma mensagem de pagamento para processamento assíncrono.
      * HELPER: Extrai lógica de submissão para reutilização e clareza.
@@ -162,7 +133,6 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
      */
     private void submitPaymentForProcessing(String paymentJson) {
         activeTaskCount.incrementAndGet();
-        totalTaskCount.incrementAndGet();
         virtualThreadExecutor.submit(() -> processPaymentMessage(paymentJson));
     }
     
@@ -177,68 +147,16 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
             Payment payment = objectMapper.readValue(paymentJson, Payment.class);
             
             // Processa o pagamento de forma assíncrona
-            processPaymentUseCase.processPaymentAsync(payment);                 
-                
+            var processed = processPaymentUseCase.processPaymentAsync(payment);
+                if(processed) {
+                    completedTaskCount.incrementAndGet();
+                }
         } catch (Exception e) {
             // Mantém apenas log de erro com informação mínima
             logger.error("Erro ao processar mensagem de pagamento: {}", e.getMessage());
         } finally {
             // Decrementa contador de tarefas ativas e incrementa contador de concluídas
             activeTaskCount.decrementAndGet();
-            completedTaskCount.incrementAndGet();
-        }
-    }
-    
-    /**
-     * Obtém status atual do worker para monitoramento.
-     * IMPLEMENTA: Métricas avançadas baseadas nas recomendações do artigo.
-     * @return Status atual com métricas de desempenho detalhadas
-     */
-    public WorkerStatus getWorkerStatus() {
-        return new WorkerStatus(
-            activeTaskCount.get(),
-            completedTaskCount.get(),
-            totalTaskCount.get(),
-            batchCount.get()
-        );
-    }
-    
-    /**
-     * Classe interna para representar status do worker.
-     * EXPANDIDA: Com métricas adicionais para monitoramento baseado no artigo.
-     */
-    public static class WorkerStatus {
-        private final int activeThreads;
-        private final long completedTasks;
-        private final long totalTasks;
-        private final long totalBatches; // Nova métrica
-        
-        public WorkerStatus(int activeThreads, long completedTasks, long totalTasks, long totalBatches) {
-            this.activeThreads = activeThreads;
-            this.completedTasks = completedTasks;
-            this.totalTasks = totalTasks;
-            this.totalBatches = totalBatches;
-        }
-        
-        public int getActiveThreads() {
-            return activeThreads;
-        }
-        
-        public long getCompletedTasks() {
-            return completedTasks;
-        }
-        
-        public long getTotalTasks() {
-            return totalTasks;
-        }
-        
-        public long getTotalBatches() {
-            return totalBatches;
-        }
-        
-        // Métrica derivada para análise de performance
-        public double getAverageTasksPerBatch() {
-            return totalBatches > 0 ? (double) totalTasks / totalBatches : 0.0;
         }
     }
 }

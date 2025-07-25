@@ -10,9 +10,8 @@ import com.maal.asyncpaymentprocessor.domain.model.Payment;
 public interface ProcessPaymentUseCase {
     
     /**
-     * Processa um novo pagamento recebido
+     * Processa um novo pagamento recebido de forma assíncrona.
      */
-    void receivePayment(Payment payment);
-    
+    boolean processPaymentAsync(Payment payment);
 
 } 

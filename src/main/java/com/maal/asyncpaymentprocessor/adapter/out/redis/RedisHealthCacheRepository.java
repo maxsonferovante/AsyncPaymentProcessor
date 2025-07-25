@@ -124,28 +124,12 @@ public class RedisHealthCacheRepository {
         try {
             String key = buildCacheKey(type);
             redisTemplate.delete(key);
-            logger.debug("HealthStatus removido do cache: type={}", type);
         } catch (Exception e) {
             logger.error("Erro ao remover HealthStatus do cache: type={}, erro={}", type, e.getMessage());
         }
     }
     
-    /**
-     * Verifica se existe um status de saúde válido no cache para o Payment Processor.
-     * @param type Tipo do Payment Processor
-     * @return true se existe entrada válida no cache, false caso contrário
-     */
-    public boolean hasValidHealthStatus(PaymentProcessorType type) {
-        try {
-            String key = buildCacheKey(type);
-            return Boolean.TRUE.equals(redisTemplate.hasKey(key));
-        } catch (Exception e) {
-            logger.error("Erro ao verificar existência de HealthStatus no cache: type={}, erro={}", 
-                type, e.getMessage());
-            return false;
-        }
-    }
-    
+
     /**
      * Constrói a chave do cache para um tipo específico de Payment Processor.
      * @param type Tipo do Payment Processor
