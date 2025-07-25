@@ -52,8 +52,6 @@ public class HealthCheckOrchestratorImpl implements HealthCheckOrchestrator {
             // Tenta adquirir o lock imediatamente. Se outra instância já o tem, retorna false.
             locked = lock.tryLock();
             if (locked) {
-                logger.info("Instância líder adquiriu o lock para health check. Executando verificação.");
-
                 // --- Lógica existente de verificação de health check ---
                 CompletableFuture<Void> defaultCheck = CompletableFuture.runAsync(() ->
                         checkHealthAndUpdateCache(PaymentProcessorType.DEFAULT)
@@ -66,8 +64,6 @@ public class HealthCheckOrchestratorImpl implements HealthCheckOrchestrator {
                 CompletableFuture.allOf(defaultCheck, fallbackCheck)
                         .get(Duration.ofSeconds(5).toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS); // Timeout de 5 segundos para as chamadas
 
-            } else {
-                logger.info("Instância não líder, lock não adquirido para health check. Pulando execução.");
             }
         } catch (Exception e) {
             logger.error("Erro inesperado durante tentativa de adquirir lock ou executar health check: {}", e.getMessage(), e);
@@ -111,34 +107,5 @@ public class HealthCheckOrchestratorImpl implements HealthCheckOrchestrator {
                 redisHealthCacheRepository.removeHealthStatus(processorType);
             }
         }
-    }
-    
-    /**
-     * Método utilitário para verificar se um Payment Processor está saudável segundo o cache.
-     * @param processorType Tipo do Payment Processor
-     * @return true se está saudável, false caso contrário
-     */
-    public boolean isProcessorHealthy(PaymentProcessorType processorType) {
-        Optional<HealthStatus> healthStatusOpt = redisHealthCacheRepository.getHealthStatus(processorType);
-        
-        if (healthStatusOpt.isEmpty()) {
-            return false; // Se não há informação no cache, considera como não saudável
-        }
-        
-        HealthStatus healthStatus = healthStatusOpt.get();
-        return !healthStatus.isFailing(); // Retorna true se NÃO está falhando
-    }
-    
-    /**
-     * Obtém o tempo mínimo de resposta de um Payment Processor do cache.
-     * @param processorType Tipo do Payment Processor
-     * @return Tempo mínimo de resposta em ms, ou 0 se não disponível
-     */
-    public int getMinResponseTime(PaymentProcessorType processorType) {
-        Optional<HealthStatus> healthStatusOpt = redisHealthCacheRepository.getHealthStatus(processorType);
-        
-        return healthStatusOpt
-            .map(HealthStatus::getMinResponseTime)
-            .orElse(0);
     }
 }

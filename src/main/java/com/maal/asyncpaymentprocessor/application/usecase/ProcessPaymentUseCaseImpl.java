@@ -119,19 +119,12 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
     private boolean isProcessorHealthy(PaymentProcessorType processorType) {
         try {
             Optional<HealthStatus> healthStatus = healthCacheRepository.getHealthStatus(processorType);
-            
-            if (healthStatus.isPresent()) {
-                return !healthStatus.get().isFailing();
-            } else {
-                // MUDANÇA CRÍTICA: Se não há informação de health no cache, assume healthy
-                logger.debug("Sem informação de health para {}, assumindo healthy", processorType);
-                return true;
-            }
-            
+            // Se não há informação, assume que está falhando, mas não bloqueia processamento
+            return healthStatus.filter(status -> !status.isFailing()).isPresent();
         } catch (Exception e) {
             logger.warn("Erro ao verificar health status para {}: {}", processorType, e.getMessage());
-            // Em caso de erro, assume healthy para não bloquear processamento
-            return true;
+            // Em caso de erro, assume falha, mas não bloqueia processamento
+            return false;
         }
     }
     
@@ -140,6 +133,7 @@ public class ProcessPaymentUseCaseImpl implements ProcessPaymentUseCase {
      * @param payment Pagamento que falhou
      */
     private void handlePaymentFailure(Payment payment) {
+
         try {
             payment.setRetryCount(payment.getRetryCount() + 1);
             payment.setStatus(PaymentStatus.RETRY);
