@@ -1,8 +1,7 @@
 # Build GraalVM Native
-FROM ghcr.io/graalvm/graalvm-community:24-ol9 AS builder
+FROM ghcr.io/graalvm/graalvm-community:latest AS builder
 
-RUN microdnf update -y && \
-    microdnf install -y gcc glibc-devel zlib-devel libstdc++-static && \
+RUN microdnf install -y gcc gcc-c++ make zlib-devel && \
     microdnf clean all
 
 WORKDIR /app
@@ -21,11 +20,11 @@ RUN ./gradlew nativeCompile \
     -Pspring.native.gradle.build-args="-O3,--gc=G1,--enable-preview,--strict-image-heap,--enable-native-access=ALL-UNNAMED"
 
 # Runtime
-FROM redhat/ubi9-minimal:latest AS runtime
+FROM ubuntu:22.04 AS runtime
 
-RUN microdnf update -y && \
-    microdnf install -y glibc libgcc libstdc++ && \
-    microdnf clean all && \
+RUN apt-get update && \
+    apt-get install -y ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
     adduser --system --no-create-home appuser
 
 WORKDIR /app
@@ -44,4 +43,3 @@ HEALTHCHECK --interval=5s --timeout=2s --start-period=5s --retries=3 \
       CMD test -e /proc/self || exit 1
 
 ENTRYPOINT ["./app"]
-
