@@ -11,16 +11,12 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
+
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Worker responsável por consumir pagamentos da fila Redis e processá-los de forma assíncrona.
- * OTIMIZADO: Usa técnicas avançadas de batch reading e pipeline operations baseadas.
- */
 @Component
 public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
 
@@ -56,12 +52,7 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
         this.virtualThreadExecutor = Executors.newVirtualThreadPerTaskExecutor();
     }
 
-    /**
-     * Executa o worker que consome mensagens da fila Redis.
-     * OTIMIZADO: Usa estratégia híbrida baseada no artigo Medium para máximo throughput.
-     * Frequência configurável via propriedade rinha.worker.execution-delay.
-     */
-    // Troca fixedDelay -> fixedRate para iniciar ciclos em intervalos fixos
+
     @Scheduled(fixedRateString = "${rinha.worker.execution-delay}")
     @Override
     public void execute() {
@@ -74,10 +65,7 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
         }
     }
     
-    /**
-     * Processa um lote de pagamentos usando estratégia otimizada com processamento em streaming.
-     * OTIMIZADO: Elimina duplo loop - processa mensagens conforme são lidas para menor latência.
-     */
+
     private void processBatchPaymentsOptimized() {
         try {
             int availableSlots = maxConcurrentPayments - activeTaskCount.get();            
@@ -90,14 +78,7 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
             logger.error("Erro ao processar lote otimizado: {}", e.getMessage(), e);
         }
     }
-    
-    /**
-     * Lê e processa mensagens em streaming - OTIMIZAÇÃO: elimina duplo loop.
-     * IMPLEMENTA: Processamento imediato para menor latência e menor uso de memória.
-     * 
-     * @param maxMessages Número máximo de mensagens para ler e processar
-     * @return Número de mensagens processadas
-     */
+
     private void readAndProcessStreamOptimized(int maxMessages) {
         
         try {
@@ -125,22 +106,13 @@ public class PaymentProcessorWorkerImpl implements PaymentProcessorWorker {
             logger.error("Erro ao ler mensagens da fila: {}", e.getMessage());
         }
     }
-    /**
-     * Submete uma mensagem de pagamento para processamento assíncrono.
-     * HELPER: Extrai lógica de submissão para reutilização e clareza.
-     * 
-     * @param paymentJson JSON do pagamento a ser processado
-     */
+
     private void submitPaymentForProcessing(String paymentJson) {
         activeTaskCount.incrementAndGet();
         virtualThreadExecutor.submit(() -> processPaymentMessage(paymentJson));
     }
     
-    /**
-     * Processa uma mensagem de pagamento individual.
-     * Deserializa JSON e delega processamento para o Use Case.
-     * @param paymentJson JSON do pagamento a ser processado
-     */
+
     private void processPaymentMessage(String paymentJson) {
         try {
             // Deserializa o pagamento

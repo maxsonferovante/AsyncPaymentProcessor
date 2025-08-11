@@ -8,9 +8,13 @@ import java.util.Optional;
 
 public interface PaymentProcessorPort {
     /**
-     * Obtém o status de saúde de um Payment Processor específico.
-     * @param type O tipo de Payment Processor (DEFAULT ou FALLBACK).
-     * @return Um Optional contendo o HealthStatus se a chamada for bem-sucedida, ou Optional.empty().
+     * Processa um pagamento usando o processador de pagamentos configurado.
+     *
+     * @param payment O pagamento a ser processado.
+     * @param type O tipo de processador de pagamentos a ser usado.
+     * @return true se o pagamento foi processado com sucesso, false caso contrário.
      */
-    Optional<HealthStatus> getHealthStatus(PaymentProcessorType type);
+    boolean processPayment(Payment payment, PaymentProcessorType type);
+
+
 }

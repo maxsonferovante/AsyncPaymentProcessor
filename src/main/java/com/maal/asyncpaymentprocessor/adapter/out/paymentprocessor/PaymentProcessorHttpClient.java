@@ -22,11 +22,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 
-/**
- * Adaptador HTTP para comunicação com os Payment Processors (Default e Fallback).
- * Implementa as chamadas para processamento de pagamentos e health check usando HttpClient (java.net.http).
- * Refatorado para usar HTTP síncrono e mais confiável.
- */
+
 @Component
 public class PaymentProcessorHttpClient implements PaymentProcessorPort {
     
@@ -45,68 +41,8 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
     }
-    
-    /**
-     * Obtém o status de saúde de um Payment Processor específico.
-     * @param type O tipo de Payment Processor (DEFAULT ou FALLBACK).
-     * @return Um Optional contendo o HealthStatus se a chamada for bem-sucedida, ou Optional.empty().
-     */
-    @Override
-    @SuppressWarnings("unchecked")
-    public Optional<HealthStatus> getHealthStatus(PaymentProcessorType type) {
-        try {
-            String url = getBaseUrlForType(type) + "/payments/service-health";
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofMillis(4000))
-                    .GET()
-                    .build();
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-            if (response.statusCode() == HttpStatus.TOO_MANY_REQUESTS.value()) {
-                logger.debug("Rate limit atingido para health check {}: HTTP 429", type);
-                return Optional.empty();
-            }
-
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                Map<String, Object> body = objectMapper.readValue(response.body(), Map.class);
-                Boolean failing = (Boolean) body.get("failing");
-                Integer minResponseTime = (Integer) body.get("minResponseTime");
-                
-                HealthStatus healthStatus = new HealthStatus(
-                    failing != null ? failing : false,
-                    minResponseTime != null ? minResponseTime : 0,
-                    Instant.now()
-                );
-                
-                return Optional.of(healthStatus);
-            }
-            
-            logger.warn("Health check {} retornou resposta inválida: status={}", type, response.statusCode());
-            return Optional.empty();
-            
-        } catch (HttpTimeoutException e) {
-            logger.warn("Timeout no health check {}: {}", type, e.getMessage());
-            return Optional.empty();
-        } catch (IOException | InterruptedException e) {
-            logger.warn("Erro de I/O no health check {}: {}", type, e.getMessage());
-            Thread.currentThread().interrupt();
-            return Optional.empty();
-        } catch (Exception e) {
-            logger.error("Erro inesperado no health check {}: {}", type, e.getMessage(), e);
-            return Optional.empty();
-        }
-    }
-    
-    /**
-     * Processa um pagamento através do Payment Processor especificado.
-     * @param payment Pagamento a ser processado
-     * @param type Tipo do Payment Processor a ser usado
-     * @return true se processado com sucesso, false caso contrário
-     */
-    @SuppressWarnings("unchecked")
     public boolean processPayment(Payment payment, PaymentProcessorType type) {
         try {
             String url = getBaseUrlForType(type) + "/payments";
@@ -122,14 +58,14 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .timeout(Duration.ofMillis(4000))
+                    .timeout(Duration.ofMillis(10000))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                     .build();
 
-            HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-            return response.statusCode() >= 200 && response.statusCode() < 300;
+            return isSuccessfulResponse(response.statusCode(), response.body());
 
         } catch (HttpTimeoutException e) {
             logger.error("Timeout processando pagamento {} via {}: {}", payment.getCorrelationId(), type, e.getMessage());
@@ -144,11 +80,17 @@ public class PaymentProcessorHttpClient implements PaymentProcessorPort {
         }
     }
     
-    /**
-     * Retorna a URL base apropriada para o tipo de Payment Processor.
-     * @param type Tipo do Payment Processor
-     * @return URL base configurada para o tipo especificado
-     */
+    private boolean isSuccessfulResponse(int statusCode, String responseBody) {
+        return isSuccessful200Response(statusCode, responseBody) || isDuplicatePayment422Response(statusCode, responseBody);
+    }
+
+    private boolean isSuccessful200Response(int statusCode, String responseBody) {
+        return statusCode == 200 && responseBody.contains("payment processed successfully");
+    }
+
+    private boolean isDuplicatePayment422Response(int statusCode, String responseBody) {
+        return statusCode == 422 && responseBody.toLowerCase().contains("correlationid already exists");
+    }
     private String getBaseUrlForType(PaymentProcessorType type) {
         return switch (type) {
             case DEFAULT -> DEFAULT_PROCESSOR_URL;

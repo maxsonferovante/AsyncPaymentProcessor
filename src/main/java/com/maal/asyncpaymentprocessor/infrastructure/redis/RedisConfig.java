@@ -11,19 +11,12 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.time.Duration;
 
-/**
- * Configuração do Redis para cache de health status e filas de pagamentos.
- * Configura RedisTemplate e ObjectMapper otimizados para performance e 
- * compatibilidade com GraalVM Native Image.
- */
+
 @Configuration
 @EnableScheduling // Habilita scheduling para health check e worker
 public class RedisConfig {
 
-    /**
-     * Configura RedisTemplate para operações com Redis.
-     * Usa serialização String para chaves e valores para máxima compatibilidade.
-     */
+
     @Bean
     public RedisTemplate<String, String> redisTemplate(RedisConnectionFactory connectionFactory) {
         RedisTemplate<String, String> template = new RedisTemplate<>();

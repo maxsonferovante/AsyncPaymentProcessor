@@ -10,11 +10,6 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 
-/**
- * Gerencia o histórico de pagamentos processados, salvando cada pagamento
- * em listas separadas no Redis para permitir a filtragem por data.
- * Substitui a abordagem de contadores agregados.
- */
 @Service
 public class PaymentHistoryService {
 
@@ -31,11 +26,7 @@ public class PaymentHistoryService {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
     }
-    /**
-     * Grava um pagamento completo na lista Redis correspondente ao seu processador.
-     *
-     * @param payment O pagamento a ser registrado.
-     */
+
     public void recordPayment(Payment payment) {
         if (payment.getPaymentProcessorType() == null) {
             logger.error("Tentativa de gravar pagamento com tipo de processador nulo. CorrelationId: {}", payment.getCorrelationId());
